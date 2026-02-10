@@ -1,0 +1,1461 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <title>BX Signal</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css?family=Fira+Sans:400,300,700,500,400italic,500italic,700italic,300italic');
+    body { margin: 0; background: black; color: white; font-family: Arial; }
+    #map { height: 100vh; } /* Full-screen map */
+    .leaflet-marker-icon {
+      box-shadow: 0 0 10px lightblue; /* Feathered glow */
+      transition: box-shadow 1s ease-in-out; /* Smooth breathe */
+    }
+    #radar-sweep {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 600;
+      overflow: hidden;
+      mix-blend-mode: luminosity;
+    }
+    .leaflet-top {
+      top: 62px; /* keep controls below the top bar */
+    }
+    #radar-sweep .laser {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      width: 2px;
+      background: rgba(240, 248, 255, 0.85);
+      box-shadow: 0 0 14px rgba(240, 248, 255, 0.35);
+      opacity: 0;
+      transform: translateX(100vw);
+    }
+    #radar-sweep .wave {
+      position: absolute;
+      top: -10%;
+      bottom: -10%;
+      width: 36px;
+      background: radial-gradient(circle at 50% 50%, rgba(120, 255, 255, 0.18), rgba(120, 255, 255, 0));
+      filter: blur(6px);
+      opacity: 0;
+      transform: translateX(100vw);
+    }
+    .top-bar {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 56px;
+      z-index: 1000;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 18px;
+      color: white;
+      background: rgba(25, 25, 25, 0.55);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .brand-text {
+      display: flex;
+      flex-direction: column;
+      line-height: 1.1;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+    .brand-title {
+      font-weight: 700;
+      font-size: 14px;
+    }
+    .brand-subtitle {
+      font-weight: 600;
+      font-size: 10px;
+      opacity: 0.85;
+    }
+    .brand-mark {
+      width: 30px;
+      height: 30px;
+      display: inline-block;
+    }
+    .menu-icon {
+      width: 22px;
+      height: 14px;
+      display: inline-flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+    .menu-icon span {
+      display: block;
+      height: 2px;
+      background: white;
+      border-radius: 2px;
+      opacity: 0.9;
+    }
+    .controls {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .signal-button {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 12px;
+      border-radius: 999px;
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      background: rgba(255, 255, 255, 0.08);
+      color: white;
+      font-size: 11px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      cursor: pointer;
+      box-shadow: 0 0 12px rgba(255, 255, 255, 0.18);
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
+      overflow: hidden;
+    }
+    .signal-button:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 0 16px rgba(255, 255, 255, 0.3);
+    }
+    .signal-button .spark {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: white;
+      box-shadow: 0 0 8px rgba(255, 255, 255, 0.8);
+    }
+    .signal-button::after {
+      content: '';
+      position: absolute;
+      inset: -20px;
+      border-radius: 999px;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      opacity: 0;
+      transform: scale(0.6);
+    }
+    .signal-button.is-burst::after {
+      animation: signalBurst 0.65s ease-out;
+    }
+    @keyframes signalBurst {
+      0% { opacity: 0.6; transform: scale(0.7); }
+      100% { opacity: 0; transform: scale(1.4); }
+    }
+    .signal-modal {
+      position: fixed;
+      inset: 0;
+      z-index: 1200;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      background: rgba(0, 0, 0, 0.55);
+      backdrop-filter: blur(6px);
+      -webkit-backdrop-filter: blur(6px);
+    }
+    .signal-modal.is-open {
+      display: flex;
+    }
+    .signal-card {
+      width: min(92vw, 420px);
+      border-radius: 16px;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      background: rgba(18, 18, 18, 0.95);
+      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
+      padding: 16px;
+      color: white;
+    }
+    .signal-card h3 {
+      margin: 0 0 6px 0;
+      font-size: 14px;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    .signal-card p {
+      margin: 0 0 12px 0;
+      font-size: 12px;
+      opacity: 0.8;
+    }
+    .signal-form {
+      display: grid;
+      gap: 10px;
+    }
+    .signal-form > div {
+      display: grid;
+      gap: 6px;
+    }
+    .signal-form label {
+      font-size: 11px;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      opacity: 0.75;
+    }
+    .signal-form input,
+    .signal-form textarea {
+      width: 100%;
+      box-sizing: border-box;
+      border-radius: 10px;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      background: rgba(255, 255, 255, 0.06);
+      color: white;
+      padding: 8px 10px;
+      font-size: 12px;
+      font-family: inherit;
+    }
+    .signal-form textarea {
+      min-height: 72px;
+      resize: vertical;
+    }
+    .signal-actions {
+      display: flex;
+      gap: 8px;
+      justify-content: flex-end;
+      margin-top: 6px;
+    }
+    .signal-actions button {
+      border-radius: 999px;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      background: rgba(255, 255, 255, 0.08);
+      color: white;
+      padding: 6px 12px;
+      font-size: 11px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      cursor: pointer;
+    }
+    .signal-actions .primary {
+      background: rgba(255, 255, 255, 0.16);
+    }
+    .signal-card.is-submitted {
+      animation: submitDissolve 0.5s ease-out forwards;
+    }
+    @keyframes submitDissolve {
+      0% { opacity: 1; transform: scale(1); }
+      100% { opacity: 0; transform: scale(0.98); }
+    }
+    .audio-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      background: rgba(255, 255, 255, 0.06);
+      color: white;
+      font-size: 11px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      cursor: pointer;
+    }
+    .audio-toggle .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #fff;
+      box-shadow: none;
+    }
+    .audio-toggle.off .dot {
+      background: #777;
+      box-shadow: none;
+    }
+    .audio-toggle:not(.off) .dot {
+      box-shadow: 0 0 8px rgba(255, 255, 255, 0.8);
+    }
+    .audio-volume {
+      width: 90px;
+      accent-color: #fff;
+    }
+    .legend {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 0;
+      border-radius: 0;
+      background: transparent;
+      border: none;
+      font-size: 10px;
+      letter-spacing: 0.04em;
+      flex-wrap: nowrap;
+      max-width: 58vw;
+      position: relative;
+    }
+    .legend-control {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+    }
+    .legend-dropdown {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      cursor: pointer;
+      user-select: none;
+    }
+    .legend-dropdown .caret {
+      width: 0;
+      height: 0;
+      border-left: 4px solid transparent;
+      border-right: 4px solid transparent;
+      border-top: 6px solid rgba(255, 255, 255, 0.8);
+      margin-left: 2px;
+    }
+    .legend-menu {
+      position: absolute;
+      top: calc(100% + 8px);
+      left: 50%;
+      transform: translateX(-50%);
+      min-width: 180px;
+      max-height: 240px;
+      overflow-y: auto;
+      background: rgba(15, 15, 15, 0.95);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 12px;
+      padding: 6px;
+      box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4);
+      display: none;
+      z-index: 1001;
+    }
+    .legend-menu.is-open {
+      display: block;
+    }
+    .signal-fab {
+      position: relative;
+      z-index: 900;
+    }
+    .signal-btn {
+      cursor: pointer;
+      border: none;
+      background: #ff3b3b;
+      color: white;
+      padding: 10px 14px;
+      border-radius: 10px;
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      box-shadow: 0 0 12px rgba(255, 80, 80, 0.4);
+      animation: signalAlarm 2.6s ease-in-out infinite;
+    }
+    @keyframes signalAlarm {
+      0%, 100% {
+        box-shadow: 0 0 10px rgba(255, 80, 80, 0.35);
+        filter: brightness(1);
+      }
+      50% {
+        box-shadow: 0 0 18px rgba(255, 80, 80, 0.7);
+        filter: brightness(1.1);
+      }
+    }
+    .legend-title {
+      font-weight: 700;
+      text-transform: uppercase;
+      font-size: 9px;
+      opacity: 0.7;
+      white-space: nowrap;
+    }
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin: 2px 0;
+      opacity: 0.9;
+      cursor: pointer;
+      padding: 4px 8px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid transparent;
+      white-space: nowrap;
+    }
+    .legend-desc {
+      max-width: 0;
+      opacity: 0;
+      overflow: hidden;
+      transition: max-width 0.25s ease, opacity 0.2s ease;
+      font-size: 9px;
+      letter-spacing: 0.04em;
+      color: rgba(255, 255, 255, 0.75);
+    }
+    .legend-item:hover .legend-desc {
+      max-width: 180px;
+      opacity: 1;
+    }
+    .legend-item:hover {
+      background: var(--topic-color-soft, rgba(255, 255, 255, 0.12));
+      border-color: var(--topic-color, rgba(255, 255, 255, 0.4));
+      box-shadow: 0 0 10px var(--topic-color, rgba(255, 255, 255, 0.4));
+    }
+    .legend-item.is-selected {
+      opacity: 1;
+      font-weight: 700;
+      background: rgba(255, 255, 255, 0.18);
+    }
+    .legend-swatch {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      box-shadow: 0 0 6px currentColor;
+      background: currentColor;
+      flex: 0 0 8px;
+    }
+    .event-tooltip {
+      background: rgba(15, 15, 15, 0.9);
+      color: #fff;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 8px;
+      padding: 8px 10px;
+      box-shadow: 0 8px 22px rgba(0, 0, 0, 0.35);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      font-size: 12px;
+      line-height: 1.35;
+    }
+    .event-tooltip h4 {
+      margin: 0 0 6px 0;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      text-transform: none;
+    }
+    .event-tooltip ul {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+    }
+    .event-tooltip li {
+      margin: 2px 0;
+      opacity: 0.9;
+    }
+    .event-tooltip.event-live {
+      border-color: rgba(255, 77, 77, 0.55);
+      box-shadow: 0 10px 26px rgba(255, 77, 77, 0.15);
+    }
+    .event-tooltip.event-upcoming {
+      border-color: rgba(124, 255, 210, 0.35);
+    }
+    .event-tooltip.event-cooldown {
+      opacity: 0.85;
+    }
+    .onboarding {
+      position: fixed;
+      inset: 0;
+      z-index: 1400;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      background: rgba(0, 0, 0, 0.7);
+      backdrop-filter: blur(6px);
+      -webkit-backdrop-filter: blur(6px);
+    }
+    .onboarding.is-open {
+      display: flex;
+    }
+    .onboarding-card {
+      width: min(92vw, 360px);
+      border-radius: 22px;
+      background: radial-gradient(circle at top, rgba(40, 40, 40, 0.85), rgba(10, 10, 10, 0.95));
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
+      padding: 18px;
+      color: white;
+      position: relative;
+    }
+    .onboarding-close {
+      position: absolute;
+      right: 14px;
+      top: 12px;
+      font-size: 11px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      opacity: 0.75;
+      cursor: pointer;
+      background: transparent;
+      border: none;
+      color: white;
+    }
+    .onboarding-title {
+      text-align: center;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      margin: 18px 0 6px 0;
+      font-size: 16px;
+    }
+    .onboarding-subtitle {
+      text-align: center;
+      font-size: 11px;
+      opacity: 0.75;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    .onboarding-panel {
+      margin-top: 18px;
+    }
+    .onboarding-box {
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 14px;
+      padding: 14px;
+      text-align: center;
+    }
+    .onboarding-input {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 10px 12px;
+      border-radius: 10px;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      background: rgba(255, 255, 255, 0.06);
+      color: white;
+      font-size: 12px;
+    }
+    .onboarding-text {
+      font-size: 12px;
+      line-height: 1.5;
+      opacity: 0.9;
+      text-align: center;
+    }
+    #news-ticker {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      height: 36px;
+      z-index: 700;
+      background: rgba(15, 15, 15, 0.7);
+      border-top: 1px solid rgba(255, 255, 255, 0.08);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      font-size: 12px;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      font-family: "Courier New", Courier, monospace;
+    }
+    #news-ticker .track {
+      display: flex;
+      align-items: center;
+      gap: 28px;
+      white-space: nowrap;
+      will-change: transform;
+      animation: ticker 133s linear infinite;
+    }
+    #news-ticker .item {
+      opacity: 0.9;
+      color: #ffd700;
+    }
+    #news-ticker a {
+      color: inherit;
+      text-decoration: none;
+    }
+    #news-ticker a:hover {
+      text-decoration: underline;
+    }
+    #news-ticker .dot {
+      opacity: 0.35;
+    }
+    @keyframes ticker {
+      from { transform: translateX(0); }
+      to { transform: translateX(-50%); }
+    }
+  </style>
+</head>
+<body>
+  <div class="top-bar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 40 40" width="30" height="30" aria-hidden="true">
+          <circle cx="20" cy="20" r="9" fill="none" stroke="white" stroke-width="2" opacity="0.9" />
+          <circle cx="20" cy="20" r="4" fill="none" stroke="white" stroke-width="2" opacity="0.9" />
+          <circle cx="20" cy="20" r="1.6" fill="white" />
+          <path d="M20 20 L34 10" stroke="white" stroke-width="2" stroke-linecap="round" />
+          <path d="M8 26 A14 14 0 0 1 26 8" fill="none" stroke="white" stroke-width="1.6" opacity="0.7" />
+        </svg>
+      </span>
+      <span class="brand-text">
+        <span class="brand-title">BX SIGNAL</span>
+        <span class="brand-subtitle">A Neighborhood Tracker</span>
+      </span>
+    </div>
+    <div id="legend" class="legend"></div>
+    <div class="controls">
+      <div class="signal-fab">
+        <button id="signal-button" class="signal-btn" type="button" aria-label="Send a signal">
+          Send a Signal
+        </button>
+      </div>
+      <button id="audio-toggle" class="audio-toggle" type="button" aria-label="Toggle radar sound">
+        <span class="dot"></span>
+        <span id="audio-label">Audio On</span>
+      </button>
+      <input id="audio-volume" class="audio-volume" type="range" min="0" max="100" value="70" aria-label="Radar volume" />
+      <div class="menu-icon" aria-label="Menu">
+        <span></span>
+        <span></span>
+        <span></span>
+      </div>
+    </div>
+  </div>
+  <div id="map"></div> <!-- Map goes here -->
+  <div id="news-ticker">
+    <div class="track" id="news-track"></div>
+  </div>
+  <div id="signal-modal" class="signal-modal" aria-hidden="true">
+    <div class="signal-card" role="dialog" aria-modal="true" aria-labelledby="signal-title">
+      <h3 id="signal-title">Send a Signal</h3>
+      <p>Your signal will be reviewed before appearing on the map.</p>
+      <form id="signal-form" class="signal-form">
+        <div>
+          <label for="signal-title-input">What</label>
+          <input id="signal-title-input" name="title" type="text" placeholder="Brief title" required />
+        </div>
+        <div>
+          <label for="signal-when-input">When</label>
+          <input id="signal-when-input" name="when" type="datetime-local" required />
+        </div>
+        <div>
+          <label for="signal-where-input">Where</label>
+          <input id="signal-where-input" name="location" type="text" placeholder="Location or intersection" required />
+        </div>
+        <div>
+          <label for="signal-contact-input">Who / Contact</label>
+          <input id="signal-contact-input" name="contact" type="text" placeholder="Name, phone, or handle" required />
+        </div>
+        <div>
+          <label for="signal-note-input">Notes (optional)</label>
+          <textarea id="signal-note-input" name="note" placeholder="Extra details"></textarea>
+        </div>
+        <div class="signal-actions">
+          <button type="button" id="signal-cancel">Cancel</button>
+          <button type="submit" class="primary">Send Signal</button>
+        </div>
+      </form>
+    </div>
+  </div>
+  <div id="radar-sweep">
+    <div class="laser"></div>
+    <div class="wave"></div>
+  </div>
+  <script>
+    var map = L.map('map', {
+      crs: L.CRS.EPSG3857, // Mercator for curvy, globe-like pan
+      renderer: L.canvas(), // Smooth rendering
+      zoomControl: true,
+      zoomSnap: 0.5
+    }).setView([40.8448, -73.8648], 12.8); // Bronx center, slightly closer
+    map.getPanes().overlayPane.style.transform = 'rotateX(10deg)'; // Slight tilt for rounder feel
+    map.getPanes().overlayPane.style.transformOrigin = 'center';
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+      attribution: '' // Keeps it clean, no logos
+    }).addTo(map);
+    const minutesFromNow = (minutes) =>
+      new Date(Date.now() + minutes * 60 * 1000).toISOString();
+    const daysFromNowAt = (days, hours, minutes) => {
+      const date = new Date();
+      date.setDate(date.getDate() + days);
+      date.setHours(hours, minutes, 0, 0);
+      return date.toISOString();
+    };
+
+    // Signals payload (mock fetched JSON)
+    const signalsPayload = {
+      status: 'ok',
+      generatedAt: new Date().toISOString(),
+      data: [
+        {
+          title: 'Corner Cleanup',
+          startTime: minutesFromNow(12),
+          lat: 40.8279,
+          lon: -73.9051,
+          location: 'St. Marys Park, Longwood',
+          contact: 'Text: 718-555-0144',
+          topic: 'Environment',
+          note: 'Gloves and bags provided.'
+        },
+        {
+          title: 'Hot Tea Pop-up',
+          startTime: minutesFromNow(45),
+          lat: 40.8467,
+          lon: -73.8926,
+          location: 'East 180th St & Southern Blvd',
+          contact: 'DM @bxneighbors',
+          topic: 'Community'
+        },
+        {
+          title: 'Resume Drop-In',
+          startTime: minutesFromNow(90),
+          lat: 40.8625,
+          lon: -73.9018,
+          location: 'Mott Haven Library Annex',
+          contact: 'Info: bxjobs.org',
+          topic: 'Education',
+          note: 'Bring a USB or email a PDF.'
+        },
+        {
+          title: 'Quick Mural Touch-Up',
+          startTime: minutesFromNow(180),
+          lat: 40.8554,
+          lon: -73.8706,
+          location: 'Allerton Ave Playground',
+          contact: '@BronxMuralCrew',
+          topic: 'Arts'
+        },
+        {
+          title: 'Fresh Produce Pickup',
+          startTime: minutesFromNow(360),
+          lat: 40.8138,
+          lon: -73.9166,
+          location: 'Hunts Point Riverside',
+          contact: 'Sign-up: cccs-ny.org',
+          topic: 'Food'
+        },
+        {
+          title: 'Winter Coat Share',
+          startTime: daysFromNowAt(1, 9, 0),
+          lat: 40.8363,
+          lon: -73.9119,
+          location: "St. Ann's Ave & E 144th",
+          contact: 'Call: 718-555-0199',
+          topic: 'Community',
+          note: 'Sizes for kids and adults.'
+        },
+        {
+          title: 'Alleyway Safety Check',
+          startTime: daysFromNowAt(1, 11, 30),
+          lat: 40.8702,
+          lon: -73.8859,
+          location: 'Fordham Plaza',
+          contact: 'Info: bxsafer.org',
+          topic: 'Safety'
+        },
+        {
+          title: 'Community Garden Watering',
+          startTime: daysFromNowAt(1, 13, 0),
+          lat: 40.8270,
+          lon: -73.9252,
+          location: 'Mott Haven Community Garden',
+          contact: 'Email: hello@bxgarden.org',
+          topic: 'Environment'
+        },
+        {
+          title: 'Youth STEM Huddle',
+          startTime: daysFromNowAt(1, 15, 30),
+          lat: 40.8526,
+          lon: -73.8881,
+          location: 'Bronx River Arts Center',
+          contact: 'RSVP: stem@brac.org',
+          topic: 'Education'
+        },
+        {
+          title: 'Pop-up Jazz Set',
+          startTime: daysFromNowAt(1, 18, 15),
+          lat: 40.8394,
+          lon: -73.8644,
+          location: 'Soundview Park Promenade',
+          contact: '@SoundviewSessions',
+          topic: 'Arts',
+          note: 'Bring a blanket if you can.'
+        },
+        {
+          title: 'Senior Tech Help',
+          startTime: minutesFromNow(25),
+          lat: 40.8521,
+          lon: -73.9092,
+          location: 'Melrose Senior Center',
+          contact: 'Call: 718-555-0114',
+          topic: 'Education'
+        },
+        {
+          title: 'Streetlight Check-in',
+          startTime: minutesFromNow(40),
+          lat: 40.8713,
+          lon: -73.8985,
+          location: 'Webster Ave & E 196th',
+          contact: 'Info: bxsafer.org',
+          topic: 'Safety'
+        },
+        {
+          title: 'Lunch Line Pop-up',
+          startTime: minutesFromNow(55),
+          lat: 40.8169,
+          lon: -73.9204,
+          location: 'Hunts Point Ave Station',
+          contact: 'Text: 718-555-0188',
+          topic: 'Food'
+        },
+        {
+          title: 'Storytime Circle',
+          startTime: minutesFromNow(70),
+          lat: 40.8569,
+          lon: -73.9006,
+          location: 'Claremont Park Pavilion',
+          contact: '@BXKidsRead',
+          topic: 'Education'
+        },
+        {
+          title: 'Neighborhood Walk',
+          startTime: minutesFromNow(95),
+          lat: 40.8417,
+          lon: -73.8891,
+          location: 'Tremont Park Entrance',
+          contact: 'RSVP: walk@bxneighbors.org',
+          topic: 'Community'
+        },
+        {
+          title: 'Park Bench Repair',
+          startTime: minutesFromNow(110),
+          lat: 40.8286,
+          lon: -73.9382,
+          location: 'Patterson Playground',
+          contact: 'Email: fixit@bxparks.org',
+          topic: 'Environment'
+        },
+        {
+          title: 'Afterschool Open Gym',
+          startTime: minutesFromNow(135),
+          lat: 40.8224,
+          lon: -73.8936,
+          location: 'PS 57 Gymnasium',
+          contact: 'Call: 718-555-0133',
+          topic: 'Community'
+        },
+        {
+          title: 'Bronx River Cleanup',
+          startTime: minutesFromNow(160),
+          lat: 40.8679,
+          lon: -73.8762,
+          location: 'Bronx River Greenway',
+          contact: 'Info: clean@bxriver.org',
+          topic: 'Environment'
+        },
+        {
+          title: 'Health Fair Checkups',
+          startTime: minutesFromNow(185),
+          lat: 40.8341,
+          lon: -73.9169,
+          location: 'Lincoln Medical Plaza',
+          contact: 'Call: 718-555-0166',
+          topic: 'Community'
+        },
+        {
+          title: 'Open Mic Night',
+          startTime: minutesFromNow(210),
+          lat: 40.8460,
+          lon: -73.8617,
+          location: 'Soundview Community Arts',
+          contact: '@SoundviewOpenMic',
+          topic: 'Arts'
+        },
+        {
+          title: 'Legal Aid Hours',
+          startTime: daysFromNowAt(1, 10, 0),
+          lat: 40.8229,
+          lon: -73.9128,
+          location: 'Mott Haven Justice Center',
+          contact: 'Info: 718-555-0150',
+          topic: 'Community'
+        },
+        {
+          title: 'Free Vaccination Clinic',
+          startTime: daysFromNowAt(1, 12, 30),
+          lat: 40.8486,
+          lon: -73.9143,
+          location: 'Morrisania Health Center',
+          contact: 'Call: 718-555-0191',
+          topic: 'Community'
+        },
+        {
+          title: 'Youth Art Workshop',
+          startTime: daysFromNowAt(1, 14, 0),
+          lat: 40.8604,
+          lon: -73.8887,
+          location: 'Bronx Arts Collective',
+          contact: '@BXArtsCollective',
+          topic: 'Arts'
+        },
+        {
+          title: 'Tenant Rights Clinic',
+          startTime: daysFromNowAt(1, 16, 15),
+          lat: 40.8332,
+          lon: -73.9033,
+          location: 'South Bronx United',
+          contact: 'RSVP: sbu@bronx.org',
+          topic: 'Community'
+        },
+        {
+          title: 'STEM Lab Tour',
+          startTime: daysFromNowAt(1, 17, 0),
+          lat: 40.8588,
+          lon: -73.9041,
+          location: 'Bronx Science Annex',
+          contact: 'Info: stem@bxscience.org',
+          topic: 'Education'
+        },
+        {
+          title: 'Evening Food Share',
+          startTime: daysFromNowAt(1, 18, 30),
+          lat: 40.8197,
+          lon: -73.8961,
+          location: 'Longwood Ave Pantry',
+          contact: 'Call: 718-555-0128',
+          topic: 'Food'
+        },
+        {
+          title: 'Neighborhood Watch Meet',
+          startTime: daysFromNowAt(1, 19, 0),
+          lat: 40.8710,
+          lon: -73.8796,
+          location: 'Bedford Park Community Room',
+          contact: 'Info: watch@bxsafer.org',
+          topic: 'Safety'
+        },
+        {
+          title: 'Garden Bed Building',
+          startTime: daysFromNowAt(1, 9, 30),
+          lat: 40.8248,
+          lon: -73.9286,
+          location: 'Bruckner Blvd Community Garden',
+          contact: 'Email: hello@bxgarden.org',
+          topic: 'Environment'
+        },
+        {
+          title: 'Movie in the Park',
+          startTime: daysFromNowAt(1, 20, 15),
+          lat: 40.8408,
+          lon: -73.8679,
+          location: 'Soundview Park Lawn',
+          contact: '@SoundviewSessions',
+          topic: 'Arts',
+          note: 'Family-friendly screening.'
+        }
+      ]
+    };
+    const signals = signalsPayload.data;
+    var visibleSignals = signals.filter(s => {
+      return getEventState(s.startTime) !== 'expired';
+    });
+    var pingMarkers = [];
+    const baseRadius = 2.7;
+    const minRadius = 2.7;
+    const legendEl = document.getElementById('legend');
+    let activeTopic = 'All';
+    let pendingSignals = [];
+    const topicColors = {
+      All: '#d9b34d',
+      Food: '#7cffd2',
+      Education: '#9ad0ff',
+      Environment: '#c8ff8a',
+      Community: '#ffd27c',
+      Arts: '#ff9bd5',
+      Safety: '#b7a3ff'
+    };
+    const topicDescriptions = {
+      All: 'Everything nearby',
+      Food: 'Meals, pantries, and groceries',
+      Education: 'Workshops and learning',
+      Environment: 'Cleanups and green spaces',
+      Community: 'Neighbors helping neighbors',
+      Arts: 'Culture, music, and art',
+      Safety: 'Alerts and safety checks'
+    };
+    function colorForTopic(topic) {
+      return topicColors[topic] || topicColors.Community;
+    }
+    // EVENT STATE LOGIC — DO NOT MODIFY WITHOUT UPDATING FILTERS & COLORS
+    function getEventState(startTime) {
+      const now = new Date();
+      const start = new Date(startTime);
+      const hours = (now.getTime() - start.getTime()) / 36e5;
+
+      if (start.toDateString() === now.toDateString()) return 'live';
+      if (start.getTime() > now.getTime()) return 'upcoming';
+      if (hours <= 24) return 'cooldown';
+      return 'expired';
+    }
+    function formatStartTime(iso) {
+      const start = new Date(iso);
+      const now = new Date();
+      const isToday = start.toDateString() === now.toDateString();
+      const time = start.toLocaleString(undefined, {
+        hour: 'numeric',
+        minute: '2-digit'
+      });
+      if (isToday) {
+        return `Today at ${time}`;
+      }
+      const datePart = start.toLocaleString(undefined, {
+        month: 'short',
+        day: 'numeric'
+      });
+      return `${datePart}, ${time}`;
+    }
+
+    function renderLegend(topics) {
+      const items = topics.map((t) => {
+        const color = colorForTopic(t);
+        const soft = `${color}33`;
+        const selected = t === activeTopic ? 'is-selected' : '';
+        const desc = topicDescriptions[t] || '';
+        return `<div class="legend-item ${selected}" data-topic="${t}" style="--topic-color:${color}; --topic-color-soft:${soft};"><span class="legend-swatch" style="color:${color}"></span>${t}<span class="legend-desc">${desc}</span></div>`;
+      }).join('');
+      legendEl.innerHTML = `
+        <div class="legend-title">Signals</div>
+        <div class="legend-control">
+          <div class="legend-dropdown" id="legend-toggle" role="button" aria-haspopup="true" aria-expanded="false">
+            <span>${activeTopic}</span>
+            <span class="caret"></span>
+          </div>
+          <div class="legend-menu" id="legend-menu">
+            ${items}
+          </div>
+        </div>
+      `;
+    }
+
+    renderLegend(Object.keys(topicColors));
+    legendEl.addEventListener('click', (event) => {
+      const toggle = event.target.closest('#legend-toggle');
+      const menu = legendEl.querySelector('#legend-menu');
+      if (toggle && menu) {
+        const isOpen = menu.classList.toggle('is-open');
+        toggle.setAttribute('aria-expanded', String(isOpen));
+        return;
+      }
+      const item = event.target.closest('.legend-item');
+      if (!item) return;
+      const topic = item.getAttribute('data-topic');
+      if (!topic) return;
+      activeTopic = topic;
+      refreshSignals();
+      if (menu) {
+        menu.classList.remove('is-open');
+      }
+    });
+    document.addEventListener('click', (event) => {
+      if (!legendEl.contains(event.target)) {
+        const menu = legendEl.querySelector('#legend-menu');
+        const toggle = legendEl.querySelector('#legend-toggle');
+        if (menu) menu.classList.remove('is-open');
+        if (toggle) toggle.setAttribute('aria-expanded', 'false');
+      }
+    });
+
+    // Good news ticker (static for now)
+    const trackEl = document.getElementById('news-track');
+    const buildTickerItems = (items) => items.map((t) =>
+      `<span class="item">${t}</span><span class="dot">•</span>`
+    ).join('');
+    function clearMarkers() {
+      pingMarkers.forEach((marker) => map.removeLayer(marker));
+      pingMarkers = [];
+    }
+
+    function createMarkerForSignal(s) {
+      const state = getEventState(s.startTime);
+
+      let color;
+      if (state === 'live') color = '#ff4d4d';       // red
+      else if (state === 'cooldown') color = '#777'; // grey
+      else color = colorForTopic(s.topic);            // upcoming
+      const detailItems = [
+        `<li><strong>When:</strong> ${formatStartTime(s.startTime)}</li>`,
+        `<li><strong>Location:</strong> ${s.location}</li>`,
+        `<li><strong>Contact:</strong> ${s.contact}</li>`
+      ];
+      if (s.note) {
+        detailItems.push(`<li><strong>Note:</strong> ${s.note}</li>`);
+      }
+      const detailsHtml = `
+        <h4>${s.title}</h4>
+        <ul>
+          ${detailItems.join('')}
+        </ul>
+      `;
+      const marker = L.circleMarker([s.lat, s.lon], {
+        radius: baseRadius,
+        color: color,
+        fillColor: color,
+        fillOpacity: 0.6,
+        weight: 1
+      }).addTo(map)
+        .bindPopup(detailsHtml)
+        .bindTooltip(detailsHtml, {
+          direction: 'top',
+          offset: [0, -8],
+          opacity: 0.95,
+          className: `event-tooltip event-${state}`,
+          sticky: true
+        });
+      marker._baseColor = color;
+      pingMarkers.push(marker);
+
+      if (state !== 'live') {
+        marker.setRadius(baseRadius);
+      }
+
+      // Breathing glow animation (LIVE only)
+      if (state === 'live') {
+        let direction = 1;
+        const breatheStart = Date.now();
+        const breathe = () => {
+          const baseGlow = 10;
+          const amplitude = 5;
+          const speed = 0.003; // Slower = gentler breathe
+          const t = (Date.now() - breatheStart) * speed - Math.PI / 2;
+          const newGlow = baseGlow + Math.sin(t) * amplitude;
+          const newOpacity = 0.4 + (Math.sin(t) + 1) * 0.25; // 0.4–0.9
+          marker.setStyle({
+            fillOpacity: newOpacity,
+            opacity: newOpacity
+          });
+          if (marker.getElement()) {
+            marker.getElement().style.boxShadow = `0 0 ${newGlow}px ${marker._baseColor}`; // Feather pulse
+          }
+          requestAnimationFrame(breathe);
+        };
+        breathe();
+      }
+    }
+
+    function getFilteredSignals() {
+      const nonExpired = signals.filter((s) => getEventState(s.startTime) !== 'expired');
+      if (activeTopic === 'All') return nonExpired;
+      return nonExpired.filter((s) => s.topic === activeTopic);
+    }
+
+    function refreshSignals() {
+      renderLegend(Object.keys(topicColors));
+      clearMarkers();
+      visibleSignals = getFilteredSignals();
+      pendingSignals = visibleSignals.map((s) => ({ signal: s, revealed: false }));
+    }
+    // Animate pings (populated after first scan)
+    refreshSignals();
+    /*
+    visibleSignals.forEach((s, i) => {
+      setTimeout(() => {
+        const state = getEventState(s.startTime);
+
+        let color;
+        if (state === 'live') color = '#ff4d4d';       // red
+        else if (state === 'cooldown') color = '#777'; // grey
+        else color = colorForTopic(s.topic);            // upcoming
+        const detailItems = [
+          `<li><strong>When:</strong> ${formatStartTime(s.startTime)}</li>`,
+          `<li><strong>Location:</strong> ${s.location}</li>`,
+          `<li><strong>Contact:</strong> ${s.contact}</li>`
+        ];
+        if (s.note) {
+          detailItems.push(`<li><strong>Note:</strong> ${s.note}</li>`);
+        }
+        const detailsHtml = `
+          <h4>${s.title}</h4>
+          <ul>
+            ${detailItems.join('')}
+          </ul>
+        `;
+        const marker = L.circleMarker([s.lat, s.lon], {
+          radius: baseRadius,
+          color: color,
+          fillColor: color,
+          fillOpacity: 0.6,
+          weight: 1
+        }).addTo(map)
+          .bindPopup(detailsHtml)
+          .bindTooltip(detailsHtml, {
+            direction: 'top',
+            offset: [0, -8],
+            opacity: 0.95,
+            className: `event-tooltip event-${state}`,
+            sticky: true
+          });
+        marker._baseColor = color;
+        pingMarkers.push(marker);
+
+        // Breathing glow animation
+        let direction = 1;
+        const breathe = () => {
+          const baseGlow = 10;
+          const amplitude = 5;
+          const speed = 0.003; // Slower = gentler breathe
+          const t = Date.now() * speed;
+          const newGlow = baseGlow + Math.sin(t) * amplitude;
+          const newOpacity = 0.35 + (Math.sin(t) + 1) * 0.3; // 0.35–0.95
+          marker.setStyle({
+            fillOpacity: newOpacity,
+            opacity: newOpacity
+          });
+            if (marker.getElement()) {
+              marker.getElement().style.boxShadow = `0 0 ${newGlow}px ${marker._baseColor}`; // Feather pulse
+            }
+          requestAnimationFrame(breathe);
+        };
+        breathe();
+      }, i * 500);
+    });
+    */
+
+    // Radar sweep (every 30s)
+    const sweepEl = document.getElementById('radar-sweep');
+    const laserEl = sweepEl.querySelector('.laser');
+    const waveEl = sweepEl.querySelector('.wave');
+    const sweepDuration = 2200;
+    const sweepInterval = 10000;
+    let audioCtx = null;
+    let radarReverb = null;
+    let masterGain = null;
+    let audioEnabled = true;
+    let volumeLevel = 0.7;
+
+    function createImpulse(ctx, duration, decay) {
+      const rate = ctx.sampleRate;
+      const length = rate * duration;
+      const impulse = ctx.createBuffer(2, length, rate);
+      for (let ch = 0; ch < 2; ch++) {
+        const channel = impulse.getChannelData(ch);
+        for (let i = 0; i < length; i++) {
+          channel[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / length, decay);
+        }
+      }
+      return impulse;
+    }
+
+    function softPing() {
+      if (!audioEnabled) return;
+      if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        radarReverb = audioCtx.createConvolver();
+        radarReverb.buffer = createImpulse(audioCtx, 1.6, 3.5);
+        masterGain = audioCtx.createGain();
+        masterGain.gain.setValueAtTime(volumeLevel, audioCtx.currentTime);
+        masterGain.connect(audioCtx.destination);
+      }
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+      const now = audioCtx.currentTime;
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      const dryGain = audioCtx.createGain();
+      const wetGain = audioCtx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(620, now);
+      osc.frequency.exponentialRampToValueAtTime(420, now + 0.16);
+      gain.gain.setValueAtTime(0.0001, now);
+      gain.gain.exponentialRampToValueAtTime(0.0125, now + 0.03);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.22);
+      dryGain.gain.setValueAtTime(0.175, now);
+      wetGain.gain.setValueAtTime(0.0875, now);
+      osc.connect(gain);
+      gain.connect(dryGain).connect(masterGain);
+      gain.connect(radarReverb).connect(wetGain).connect(masterGain);
+      osc.start(now);
+      osc.stop(now + 0.24);
+    }
+
+    function flashMarker(marker) {
+      const now = performance.now();
+      if (marker._lastFlash && now - marker._lastFlash < 200) return;
+      marker._lastFlash = now;
+      marker.setStyle({ weight: 2, color: '#d9ffff', fillColor: '#d9ffff' });
+      softPing();
+
+      const start = performance.now();
+      const duration = 300;
+      const from = { r: 217, g: 255, b: 255 };
+      const hexToRgb = (hex) => {
+        if (!hex) return null;
+        const normalized = hex.replace('#', '');
+        if (normalized.length === 3) {
+          const r = parseInt(normalized[0] + normalized[0], 16);
+          const g = parseInt(normalized[1] + normalized[1], 16);
+          const b = parseInt(normalized[2] + normalized[2], 16);
+          return { r, g, b };
+        }
+        if (normalized.length === 6) {
+          const r = parseInt(normalized.slice(0, 2), 16);
+          const g = parseInt(normalized.slice(2, 4), 16);
+          const b = parseInt(normalized.slice(4, 6), 16);
+          return { r, g, b };
+        }
+        return null;
+      };
+      const to = hexToRgb(marker._baseColor) || { r: 255, g: 255, b: 255 };
+      const lerp = (a, b, t) => Math.round(a + (b - a) * t);
+      const animate = (t) => {
+        const p = Math.min((t - start) / duration, 1);
+        const eased = p < 0.5
+          ? 4 * p * p * p
+          : 1 - Math.pow(-2 * p + 2, 3) / 2;
+        const r = lerp(from.r, to.r, eased);
+        const g = lerp(from.g, to.g, eased);
+        const b = lerp(from.b, to.b, eased);
+        const color = `rgb(${r}, ${g}, ${b})`;
+        marker.setStyle({ weight: 1, color, fillColor: color });
+        if (p < 1) {
+          requestAnimationFrame(animate);
+        }
+      };
+      requestAnimationFrame(animate);
+    }
+
+    function runSweep() {
+      const start = performance.now();
+      laserEl.style.opacity = '0.7';
+      waveEl.style.opacity = '0.4';
+
+      const animate = (t) => {
+        const p = Math.min((t - start) / sweepDuration, 1);
+        const width = map.getSize().x;
+        const x = (1 - p) * width;
+        laserEl.style.transform = `translateX(${x}px)`;
+        waveEl.style.transform = `translateX(${x - 18}px)`;
+        waveEl.style.opacity = String(0.25 + Math.sin(p * Math.PI) * 0.2);
+
+        const threshold = 16;
+        pendingSignals.forEach((entry) => {
+          if (entry.revealed) return;
+          const pt = map.latLngToContainerPoint([entry.signal.lat, entry.signal.lon]);
+          if (Math.abs(pt.x - x) <= threshold) {
+            entry.revealed = true;
+            createMarkerForSignal(entry.signal);
+          }
+        });
+        pingMarkers.forEach((m) => {
+          const pt = map.latLngToContainerPoint(m.getLatLng());
+          if (Math.abs(pt.x - x) <= threshold) {
+            flashMarker(m);
+          }
+        });
+
+        if (p < 1) {
+          requestAnimationFrame(animate);
+        } else {
+          laserEl.style.opacity = '0';
+          waveEl.style.opacity = '0';
+        }
+      };
+
+      requestAnimationFrame(animate);
+    }
+
+    setInterval(runSweep, sweepInterval);
+    setTimeout(runSweep, 1500);
+
+    // Audio controls
+    const audioBtn = document.getElementById('audio-toggle');
+    const audioLabel = document.getElementById('audio-label');
+    const audioVolume = document.getElementById('audio-volume');
+    volumeLevel = Math.max(0, Math.min(1, Number(audioVolume.value) / 100));
+    audioBtn.addEventListener('click', () => {
+      audioEnabled = !audioEnabled;
+      audioBtn.classList.toggle('off', !audioEnabled);
+      audioLabel.textContent = audioEnabled ? 'Audio On' : 'Audio Off';
+    });
+    audioVolume.addEventListener('input', () => {
+      volumeLevel = Math.max(0, Math.min(1, Number(audioVolume.value) / 100));
+      if (masterGain && audioCtx) {
+        masterGain.gain.setTargetAtTime(volumeLevel, audioCtx.currentTime, 0.02);
+      }
+    });
+
+    // Send a Signal modal
+    const signalBtn = document.getElementById('signal-button');
+    const signalModal = document.getElementById('signal-modal');
+    const signalForm = document.getElementById('signal-form');
+    const signalCard = document.querySelector('.signal-card');
+    const signalCancel = document.getElementById('signal-cancel');
+    const openSignalModal = () => {
+      signalModal.classList.add('is-open');
+      signalModal.setAttribute('aria-hidden', 'false');
+    };
+    const closeSignalModal = () => {
+      signalModal.classList.remove('is-open');
+      signalModal.setAttribute('aria-hidden', 'true');
+    };
+    signalBtn.addEventListener('click', () => {
+      openSignalModal();
+    });
+    signalCancel.addEventListener('click', closeSignalModal);
+    signalModal.addEventListener('click', (event) => {
+      if (event.target === signalModal) closeSignalModal();
+    });
+    signalForm.addEventListener('submit', (event) => {
+      event.preventDefault();
+      signalCard.classList.add('is-submitted');
+      setTimeout(() => {
+        signalCard.classList.remove('is-submitted');
+        closeSignalModal();
+      }, 700);
+    });
+
+    const feeds = [
+      'https://www.welcome2thebronx.com/feed/',
+      'https://www.bxtimes.com/feed/',
+      'https://thebronxfreepress.com/feed/',
+      'http://www.ny1.com/services/contentfeed.nyc|bronx.hero.rss'
+    ];
+    async function loadGoodNews() {
+      const track = document.getElementById('news-track');
+      track.innerHTML = 'Loading positive Bronx news...';
+      let allItems = [];
+      const maxPerFeed = 10;
+      const goodNewsRegex = /volunteer|arts|education|community|gather|celebrate|festival|event|positive|win|success|park|library|museum|launch|open|opening|free|support|grant|donation|clinic|health|youth|neighbors|neighborhood|culture|music|story|cleanup|garden|pantry/i;
+      const isEnglishTitle = (title) => /[A-Za-z]/.test(title) && /^[\x00-\x7F]+$/.test(title);
+      for (const feedUrl of feeds) {
+        try {
+          const proxy = `https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(feedUrl)}`;
+          const res = await fetch(proxy);
+          const data = await res.json();
+          if (data.items) {
+            const goodItems = data.items.filter(item => {
+              const title = item.title.toLowerCase();
+              return isEnglishTitle(item.title) && goodNewsRegex.test(title);
+            });
+            const seen = new Set(goodItems.map(item => item.title));
+            const fillerItems = data.items.filter(item => !seen.has(item.title) && isEnglishTitle(item.title));
+            const combined = goodItems.concat(fillerItems).slice(0, maxPerFeed);
+            allItems = allItems.concat(combined);
+          }
+        } catch (err) {
+          console.error('Feed error:', feedUrl, err);
+        }
+      }
+      allItems = [...new Map(allItems.map(item => [item.title, item])).values()];
+      allItems.sort(() => Math.random() - 0.5);
+      if (!allItems.length) {
+        return;
+      }
+      if (allItems.length < 30) {
+        const seedItems = [...allItems];
+        while (allItems.length < 30) {
+          const shuffled = seedItems
+            .slice()
+            .sort(() => Math.random() - 0.5);
+          allItems = allItems.concat(shuffled);
+        }
+        allItems = allItems.slice(0, 30);
+      }
+      const buildTickerItems = (items) => items.map((item) => {
+        const cleanTitle = item.title.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+        return `<span class="item"><a href="${item.link}" target="_blank" title="${cleanTitle}">${cleanTitle}</a></span><span class="dot">•</span>`;
+      }).join('');
+      track.innerHTML = buildTickerItems(allItems) + buildTickerItems(allItems);
+    }
+    setInterval(loadGoodNews, 300000);
+    loadGoodNews();
+
+  </script>
+</body>
+</html>
